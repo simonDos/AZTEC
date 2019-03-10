@@ -54,19 +54,19 @@ contract('ZKERC20', async (accounts) => {
 
 
     beforeEach(async () => {
-        const {TruffleArtifactAdapter, RevertTraceSubprovider} = require('@0x/sol-trace')
-        const projectRoot = '../';
-        const solcVersion = '0.5.0';
-        const artifactAdapter = new TruffleArtifactAdapter(projectRoot, solcVersion);
+        // const {TruffleArtifactAdapter, RevertTraceSubprovider} = require('@0x/sol-trace')
+        // const projectRoot = '../';
+        // const solcVersion = '0.5.0';
+        // const artifactAdapter = new TruffleArtifactAdapter(projectRoot, solcVersion);
 
-        const {Web3ProviderEngine, RPCSubprovider} = require('0x.js');
+        // const {Web3ProviderEngine, RPCSubprovider} = require('0x.js');
 
-        const revertTraceSubprovider = new RevertTraceSubprovider(artifactAdapter, accounts[0]);
+        // const revertTraceSubprovider = new RevertTraceSubprovider(artifactAdapter, accounts[0]);
 
-        providerEngine = new Web3ProviderEngine();
-        providerEngine.addProvider(revertTraceSubprovider);
-        providerEngine.addProvider(new RPCSubprovider('http://localhost:8545'));
-        providerEngine.start();
+        // providerEngine = new Web3ProviderEngine();
+        // providerEngine.addProvider(revertTraceSubprovider);
+        // providerEngine.addProvider(new RPCSubprovider('http://localhost:8545'));
+        // providerEngine.start();
 
 
         erc20 = await ERC20Mintable.at(ERC20_Address);
@@ -105,11 +105,56 @@ contract('ZKERC20', async (accounts) => {
 
     })
 
-    let aztecAccounts;
-    let notes;
-    let scalingFactor;
-    let proofOutputs;
+    // let aztecAccounts;
+    // let notes;
+    let scalingFactor = new BN(10);
+    // let proofOutputs;    
     const publicOwner = accounts[0];
+
+    async function convertTokensToZkshares({ senderAddress, mintAmount }) {
+        
+        let aztecAccounts = [...new Array(2)].map(() => secp256k1.generateAccount());
+        let notes = [
+            ...aztecAccounts.map(({publicKey}, i) => note.create(publicKey, i * mintAmount)),
+        ];
+        
+        let proofs = []
+        proofs[0] = proof.joinSplit.encodeJoinSplitTransaction({
+            inputNotes: [],
+            outputNotes: notes.slice(0, 2),
+            senderAddress,
+            inputNoteOwners: [
+                aztecAccounts[0],
+                aztecAccounts[0]
+            ],
+
+            // publicOwner address(0x0) or the holder of a public token being converted
+            // publicOwner: senderAddress,
+            publicOwner: accounts[0],
+            kPublic: -1 * mintAmount,
+            aztecAddress: joinSplit.address,
+        });
+
+
+        let proofOutputs = proofs.map(({expectedOutput}) => outputCoder.getProofOutput(expectedOutput, 0));
+        const proofHashes = proofOutputs.map(proofOutput => outputCoder.hashProofOutput(proofOutput));
+        
+        await noteRegistry.publicApprove(
+            proofHashes[0],
+            mintAmount,
+            {from: accounts[0]}
+        );
+
+        await zkerc20.confidentialTransfer(
+            proofs[0].proofData,
+            {from:senderAddress}
+        )
+
+        return {
+            notes,
+            aztecAccounts
+        }
+    }
 
 
     it('generates a dividend proof', async () => {
@@ -164,35 +209,8 @@ contract('ZKERC20', async (accounts) => {
         // console.log('Dividend proof constructed: ', dividendProof)
     })
 
-    aztecAccounts = [...new Array(2)].map(() => secp256k1.generateAccount());
 
-    let mintAmount = 20;
-    notes = [
-        ...aztecAccounts.map(({publicKey}, i) => note.create(publicKey, i * mintAmount)),
-        //...aztecAccounts.map(({publicKey}, i) => note.create(publicKey, 20)),
-    ];
-
-    it('allocates zkshares', async () => {
-
-        //await ace.setCommonReferenceString(CRS);
-
-        let proofs = []
-
-
-        proofs[0] = proof.joinSplit.encodeJoinSplitTransaction({
-            inputNotes: [],
-            outputNotes: notes.slice(0, 2),
-            senderAddress: accounts[0],
-            inputNoteOwners: [
-                aztecAccounts[0],
-                aztecAccounts[0]
-            ],
-            publicOwner,
-            kPublic: -1 * mintAmount,
-            aztecAddress: joinSplit.address,
-        });
-
-        scalingFactor = new BN(10);
+    it.only('allocates zkshares', async () => {
         await Promise.all(accounts.map(account => erc20.mint(
             account,
             scalingFactor.mul(tokensTransferred),
@@ -205,18 +223,51 @@ contract('ZKERC20', async (accounts) => {
             {from: account, gas: 4700000}
         ))); // approving tokens
 
+        await convertTokensToZkshares({
+            senderAddress: accounts[1],
+            mintAmount: 1000
+        })
 
-        proofOutputs = proofs.map(({expectedOutput}) => outputCoder.getProofOutput(expectedOutput, 0));
-        const proofHashes = proofOutputs.map(proofOutput => outputCoder.hashProofOutput(proofOutput));
-        await noteRegistry.publicApprove(
-            proofHashes[0],
-            mintAmount,
-            {from: accounts[0]}
-        );
+        await convertTokensToZkshares({
+            senderAddress: accounts[2],
+            mintAmount: 1000
+        })
 
-        await zkerc20.confidentialTransfer(
-            proofs[0].proofData
-        )
+        //await ace.setCommonReferenceString(CRS);
+
+        // let proofs = []
+        
+
+        // proofs[0] = proof.joinSplit.encodeJoinSplitTransaction({
+        //     inputNotes: [],
+        //     outputNotes: notes.slice(0, 2),
+        //     senderAddress: accounts[0],
+        //     inputNoteOwners: [
+        //         aztecAccounts[0],
+        //         aztecAccounts[0]
+        //     ],
+        //     publicOwner,
+        //     kPublic: -1 * mintAmount,
+        //     aztecAddress: joinSplit.address,
+        // });
+
+        
+        
+
+        
+
+
+        // proofOutputs = proofs.map(({expectedOutput}) => outputCoder.getProofOutput(expectedOutput, 0));
+        // const proofHashes = proofOutputs.map(proofOutput => outputCoder.hashProofOutput(proofOutput));
+        // await noteRegistry.publicApprove(
+        //     proofHashes[0],
+        //     mintAmount,
+        //     {from: accounts[0]}
+        // );
+
+        // await zkerc20.confidentialTransfer(
+        //     proofs[0].proofData
+        // )
 
     })
 
@@ -314,7 +365,7 @@ contract('ZKERC20', async (accounts) => {
     })
 
     after(async () => {
-        providerEngine.stop()
+        // providerEngine.stop()
         //process.exit(0)
     })
 
